@@ -1,11 +1,15 @@
 import {database} from "@/db/connection";
+const supabaseUrl="https://rtouphsrjhwgadqeqzfw.supabase.co";
+const supabaseKey="sb_publishable_FuXdVibS9tiawemhwZMtUQ_dCqQALQn";
 const response=(value:unknown,status=200)=>Response.json(value,{status,headers:{"Cache-Control":"no-store"}});
 const invalid=(s:string)=>response({error:s},400);
 function validOrigin(request:Request){const origin=request.headers.get("origin");return !origin||origin===new URL(request.url).origin;}
 function failure(e:unknown){console.error("Charging register error",e);return response({error:"Your register is temporarily unavailable. Please retry. Unsaved details stay in the form."},503);}
-export async function GET(){try{const result=await database().prepare("SELECT * FROM devices ORDER BY created_at DESC,id DESC").all();return response({devices:result.results});}catch(e){return failure(e);}}
+async function requireStaff(request:Request){const auth=request.headers.get("authorization");if(!auth?.startsWith("Bearer "))return response({error:"Please sign in to use the register."},401);try{const user=await fetch(`${supabaseUrl}/auth/v1/user`,{headers:{apikey:supabaseKey,authorization:auth}});if(!user.ok)return response({error:"Your login has expired. Please sign in again."},401);return null;}catch{return response({error:"Could not verify login. Please retry."},503);}}
+export async function GET(request:Request){const denied=await requireStaff(request);if(denied)return denied;try{const result=await database().prepare("SELECT * FROM devices ORDER BY created_at DESC,id DESC").all();return response({devices:result.results});}catch(e){return failure(e);}}
 export async function POST(request:Request){
  if(!validOrigin(request))return response({error:"Request not allowed."},403);
+ const denied=await requireStaff(request);if(denied)return denied;
  let p;try{p=await request.json();}catch{return invalid("Please provide valid device details.");}
  if(!p||typeof p.customer!=="string"||!p.customer.trim()||p.customer.trim().length>100||typeof p.device!=="string"||!p.device.trim()||p.device.trim().length>160)return invalid("Enter a customer name and device model.");
  if(!Number.isSafeInteger(p.amount)||p.amount<0||p.amount>1000000000)return invalid("Enter a valid charging fee between 0 and 10,000,000.");
@@ -15,6 +19,7 @@ export async function POST(request:Request){
 }
 export async function PATCH(request:Request){
  if(!validOrigin(request))return response({error:"Request not allowed."},403);
+ const denied=await requireStaff(request);if(denied)return denied;
  let p;try{p=await request.json();}catch{return invalid("Invalid update.");}
  if(!p||!Number.isSafeInteger(p.id)||p.id<1||!["cash","transfer","ready","collected"].includes(p.action))return invalid("Invalid ticket or action.");
  try{const db=database(),now=new Date().toISOString();let row;
